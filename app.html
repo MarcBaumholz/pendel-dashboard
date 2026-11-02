@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pendel Schwaikheim</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&family=Overpass+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  /* Layout: Urteil oben, Karte mit beiden Wegen, darunter Bahn-Tafel und Auto nebeneinander. */
+  :root {
+    --bg: #eef2f5; --panel: #ffffff; --fg: #14202b; --muted: #5b6b7a; --line: #d5dce3;
+    --accent: #0b5fa5; --s3: #f08a00; --good: #1e7f4f; --warn: #a86a12; --bad: #c0392b; --chip: #e3e9ee;
+    --font-display: "Overpass", "Helvetica Neue", Arial, sans-serif;
+    --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Overpass Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e151c; --panel: #16212b; --fg: #e6edf3; --muted: #93a4b4; --line: #26343f;
+      --accent: #5aa9e6; --s3: #ff9f2e; --good: #4cc38a; --warn: #e3b341; --bad: #f0776a; --chip: #22303c;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.45; }
+  .wrap { max-width: 1100px; margin-inline: auto; padding: 24px 16px 40px; display: grid; gap: 20px; }
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+  h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(1.5rem, 4vw, 2.1rem); letter-spacing: -0.01em; margin: 0; }
+  h1 .arrow { color: var(--accent); }
+  .stand { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  button, input { font: inherit; color: var(--fg); }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  label.fuss { display: flex; align-items: center; gap: 6px; font-size: 0.875rem; color: var(--muted); }
+  label.fuss input { width: 3.2em; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-family: var(--font-mono); text-align: right; }
+
+  .route { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 10px; align-items: end; }
+  .route label { display: grid; gap: 4px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .route input { font-size: 1rem; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); text-transform: none; letter-spacing: 0; }
+  .route button { padding: 10px 14px; border-radius: 8px; }
+  #anzeigen { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  #tauschen { font-size: 1.1rem; line-height: 1; }
+  @media (max-width: 640px) {
+    .route { grid-template-columns: 1fr auto; }
+    .route label[for="start"], .route label[for="ziel"] { grid-column: 1; }
+    #tauschen { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+    #anzeigen { grid-column: 1 / -1; }
+  }
+  .urteil { background: var(--accent); color: #fff; border-radius: 10px; padding: 16px 20px; display: grid; gap: 4px; }
+  .urteil .kicker { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.85; }
+  .urteil .satz { font-family: var(--font-display); font-weight: 600; font-size: clamp(1.15rem, 3vw, 1.6rem); }
+  .urteil .detail { font-size: 0.9rem; opacity: 0.9; font-variant-numeric: tabular-nums; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; display: grid; gap: 14px; min-width: 0; }
+  .card h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.1rem; margin: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .card h2 small { font-family: var(--font-body); font-weight: 400; font-size: 0.8rem; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 20px; align-items: start; }
+
+  .karte-card { padding: 0; overflow: hidden; }
+  .karte-card h2 { padding: 14px 20px 0; }
+  #karte { height: 380px; width: 100%; background: var(--chip); }
+  /* OSM hat keine dunklen Kacheln: im Dark Mode invertieren, Farben grob zurückdrehen. */
+  .kacheln-dunkel { filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9); }
+  .legende { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 20px 14px; font-size: 0.85rem; color: var(--muted); }
+  .legende span { display: inline-flex; align-items: center; gap: 6px; }
+  .legende i { display: inline-block; width: 22px; height: 4px; border-radius: 2px; }
+
+  .tafel { list-style: none; margin: 0; padding: 0; display: grid; }
+  .zug { display: grid; grid-template-columns: 4.2rem 1fr auto; gap: 4px 12px; align-items: center; padding-block: 10px; border-top: 1px solid var(--line); }
+  .zug:first-child { border-top: 0; padding-top: 0; }
+  .zeit { font-family: var(--font-mono); font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .zeit .ist { font-size: 1.25rem; font-weight: 600; }
+  .zeit .plan { font-size: 0.8rem; color: var(--muted); text-decoration: line-through; }
+  .mitte { min-width: 0; display: grid; gap: 2px; }
+  .linien { display: flex; flex-wrap: wrap; gap: 4px; }
+  .linie { font-family: var(--font-display); font-weight: 800; font-size: 0.78rem; padding: 1px 7px; border-radius: 999px; background: var(--chip); }
+  .linie.s3 { background: var(--s3); color: #1a1000; }
+  .sub { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .hinweis { font-size: 0.8rem; color: var(--warn); }
+  .pill { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; padding: 2px 8px; border-radius: 6px; white-space: nowrap; border: 1px solid currentColor; }
+  .pill.puenktlich { color: var(--good); }
+  .pill.spaet { color: var(--warn); }
+  .pill.sehrspaet, .pill.ausfall { color: var(--bad); }
+  .zug.ausgefallen .ist { text-decoration: line-through; color: var(--muted); }
+  .zug.verpasst { opacity: 0.5; }
+
+  .auto-zahl { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .auto-zahl .min { font-family: var(--font-display); font-weight: 800; font-size: clamp(3rem, 9vw, 4.2rem); line-height: 1; font-variant-numeric: tabular-nums; }
+  .auto-zahl .einheit { font-size: 1.1rem; color: var(--muted); }
+  .stau { font-family: var(--font-mono); font-weight: 600; }
+  .stau.frei { color: var(--good); }
+  .stau.zaeh { color: var(--warn); }
+  .stau.dicht { color: var(--bad); }
+  dl.fakten { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: 0.9rem; }
+  dl.fakten dt { color: var(--muted); }
+  dl.fakten dd { margin: 0; font-variant-numeric: tabular-nums; }
+  a.extern { color: var(--accent); font-size: 0.9rem; }
+  .zustand { color: var(--muted); }
+  .zustand code { font-family: var(--font-mono); font-size: 0.85em; background: var(--chip); padding: 1px 5px; border-radius: 4px; }
+  .lade { height: 1.1rem; border-radius: 4px; background: var(--chip); width: 70%; }
+  footer { font-size: 0.8rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <form class="route" id="route" autocomplete="on">
+    <label for="start">Start<input id="start" name="start" type="text" placeholder="Ort, Haltestelle oder Adresse" required></label>
+    <button id="tauschen" type="button" title="Start und Ziel tauschen" aria-label="Start und Ziel tauschen">⇄</button>
+    <label for="ziel">Ziel<input id="ziel" name="ziel" type="text" placeholder="Ort, Haltestelle oder Adresse" required></label>
+    <button id="anzeigen" type="submit">Anzeigen</button>
+  </form>
+
+  <header>
+    <div>
+      <h1 id="titel">Strecke wird geladen …</h1>
+      <div class="stand" id="stand">Lade Live-Daten …</div>
+    </div>
+    <div class="controls">
+      <label class="fuss" for="fussweg">Fußweg zur Haltestelle <input id="fussweg" type="number" min="0" max="60" value="8"> min</label>
+      <button id="neu" type="button">Jetzt aktualisieren</button>
+    </div>
+  </header>
+
+  <section class="urteil" aria-live="polite">
+    <span class="kicker">Wenn du jetzt losgehst</span>
+    <span class="satz" id="urteil-satz">Warte auf Bahn- und Autodaten …</span>
+    <span class="detail" id="urteil-detail"></span>
+  </section>
+
+  <section class="card karte-card" aria-labelledby="karte-titel">
+    <h2 id="karte-titel">Strecke <small>Auto nach Verkehrslage eingefärbt, Bahn gestrichelt</small></h2>
+    <div id="karte"></div>
+    <div class="legende">
+      <span><i style="background: var(--accent)"></i>Auto frei</span>
+      <span><i style="background: var(--warn)"></i>zäh</span>
+      <span><i style="background: var(--bad)"></i>Stau</span>
+      <span><i style="background: repeating-linear-gradient(90deg, var(--s3) 0 6px, transparent 6px 10px)"></i>Bahn</span>
+      <span id="verkehr-legende" hidden>Straßenfarben: Google-Verkehrslage live</span>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="bahn-titel">
+      <h2 id="bahn-titel">Bahn <small>Echtzeit VVS, jede Minute neu</small></h2>
+      <div id="bahn"><div class="lade"></div></div>
+    </section>
+    <section class="card" aria-labelledby="auto-titel">
+      <h2 id="auto-titel">Auto <small>Google, alle 3 Minuten neu</small></h2>
+      <div id="auto"><div class="lade"></div></div>
+    </section>
+  </div>
+
+  <footer>Bahn: VVS-Fahrplanauskunft mit Echtzeit. Auto: Google Routes API mit Verkehrslage. <span id="karten-quelle"></span></footer>
+</div>
+
+<script>
+  const BAHN_MS = 60000;
+  const AUTO_MS = 180000;
+  const zustand = { bahn: null, auto: null, bahnFehler: null, autoFehler: null };
+  const $ = (id) => document.getElementById(id);
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const uhr = (t) => new Date(t).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  const fussInput = $("fussweg");
+  try { const g = localStorage.getItem("pendel-fussweg"); if (g != null) fussInput.value = g; } catch {}
+  const fussweg = () => Math.max(0, Number(fussInput.value) || 0);
+  fussInput.addEventListener("input", () => {
+    try { localStorage.setItem("pendel-fussweg", String(fussweg())); } catch {}
+    render();
+  });
+
+  // ---------- Strecke ----------
+  // Reihenfolge: ?start=…&ziel=… in der Adresse, dann zuletzt benutzte Strecke, dann Standard vom Server.
+  const route = { start: "", ziel: "" };
+  const abfrage = () => `start=${encodeURIComponent(route.start)}&ziel=${encodeURIComponent(route.ziel)}`;
+  function routeAusAdresse() {
+    const p = new URLSearchParams(location.search);
+    let gemerkt = {};
+    try { gemerkt = JSON.parse(localStorage.getItem("pendel-route") ?? "{}"); } catch {}
+    route.start = p.get("start") || gemerkt.start || "";
+    route.ziel = p.get("ziel") || gemerkt.ziel || "";
+  }
+  function routeSetzen(start, ziel) {
+    route.start = start.trim();
+    route.ziel = ziel.trim();
+    $("start").value = route.start;
+    $("ziel").value = route.ziel;
+    history.replaceState(null, "", `?${abfrage()}`);
+    try { localStorage.setItem("pendel-route", JSON.stringify(route)); } catch {}
+  }
+
+  // ---------- Karte ----------
+  // Google Maps mit Verkehrsebene, wenn web.mjs einen Karten-Key liefert; sonst OpenStreetMap über Leaflet.
+  const dunkel = matchMedia("(prefers-color-scheme: dark)").matches;
+  let karte = null;
+  let zugeschnitten = false;
+
+  // Google-Polyline-Format dekodieren (Schrittweise Deltas, 5 Nachkommastellen).
+  function dekodiere(str) {
+    const punkte = [];
+    let i = 0, lat = 0, lng = 0;
+    while (i < str.length) {
+      for (const achse of [0, 1]) {
+        let ergebnis = 0, shift = 0, b;
+        do { b = str.charCodeAt(i++) - 63; ergebnis |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+        const d = ergebnis & 1 ? ~(ergebnis >> 1) : ergebnis >> 1;
+        if (achse === 0) lat += d; else lng += d;
+      }
+      punkte.push([lat / 1e5, lng / 1e5]);
+    }
+    return punkte;
+  }
+
+  // Beide Kartenarten hinter denselben vier Funktionen: linie, punkt, leeren, zuschneiden.
+  function googleKarte() {
+    const g = google.maps;
+    const map = new g.Map($("karte"), {
+      center: { lat: 48.83, lng: 9.28 }, zoom: 11,
+      scrollwheel: false, mapTypeControl: false, streetViewControl: false, fullscreenControl: true,
+      colorScheme: dunkel ? g.ColorScheme?.DARK : g.ColorScheme?.LIGHT,
+    });
+    new g.TrafficLayer().setMap(map);
+    let objekte = [];
+    const pfad = (pts) => pts.map(([lat, lng]) => ({ lat, lng }));
+    return {
+      linie(pts, { farbe, dicke, gestrichelt }) {
+        const opts = { path: pfad(pts), map, strokeColor: farbe, strokeWeight: dicke, strokeOpacity: 0.95, zIndex: gestrichelt ? 2 : 3 };
+        if (gestrichelt) Object.assign(opts, { strokeOpacity: 0, icons: [{ icon: { path: "M 0,-1 0,1", strokeOpacity: 1, strokeColor: farbe, scale: dicke }, offset: "0", repeat: "14px" }] });
+        objekte.push(new g.Polyline(opts));
+      },
+      punkt([lat, lng], titel, fuellung) {
+        objekte.push(new g.Marker({ position: { lat, lng }, map, title: titel, zIndex: 5,
+          icon: { path: g.SymbolPath.CIRCLE, scale: 7, fillColor: fuellung, fillOpacity: 1, strokeColor: "#14202b", strokeWeight: 3 } }));
+      },
+      leeren() { objekte.forEach((o) => o.setMap(null)); objekte = []; },
+      zuschneiden(pts) {
+        const b = new g.LatLngBounds();
+        pts.forEach(([lat, lng]) => b.extend({ lat, lng }));
+        map.fitBounds(b, 24);
+      },
+    };
+  }
+
+  function osmKarte() {
+    const map = L.map("karte", { attributionControl: false, scrollWheelZoom: false }).setView([48.83, 9.28], 11);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 18, className: dunkel ? "kacheln-dunkel" : "" }).addTo(map);
+    const ebene = L.layerGroup().addTo(map);
+    return {
+      linie(pts, { farbe, dicke, gestrichelt }) { L.polyline(pts, { color: farbe, weight: dicke, dashArray: gestrichelt ? "8 6" : null, opacity: 0.95 }).addTo(ebene); },
+      punkt(p, titel, fuellung) { L.circleMarker(p, { radius: 7, color: css("--fg"), fillColor: fuellung, fillOpacity: 1, weight: 3 }).bindTooltip(titel).addTo(ebene); },
+      leeren() { ebene.clearLayers(); },
+      zuschneiden(pts) { map.fitBounds(pts, { padding: [24, 24] }); },
+    };
+  }
+
+  function ladeGoogle(key) {
+    return new Promise((ok, fehler) => {
+      window.googleBereit = ok;
+      const s = document.createElement("script");
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&language=de&region=DE&callback=googleBereit`;
+      s.async = true;
+      s.onerror = fehler;
+      document.head.append(s);
+    });
+  }
+
+  async function starteKarte() {
+    let key = null;
+    try { key = (await (await fetch("/api/config")).json()).kartenKey; } catch {}
+    if (key) {
+      try {
+        await ladeGoogle(key);
+        karte = googleKarte();
+        $("verkehr-legende").hidden = false;
+      } catch { karte = osmKarte(); }
+    } else {
+      karte = osmKarte();
+    }
+    $("karten-quelle").textContent = key ? "Karte: © Google." : "Karte: © OpenStreetMap-Mitwirkende.";
+    zeichneKarte();
+  }
+
+  function zeichneKarte() {
+    if (!karte) return;
+    karte.leeren();
+    const grenzen = [];
+
+    const strecke = zustand.bahn?.strecke ?? [];
+    if (strecke.length) {
+      karte.linie(strecke, { farbe: css("--s3"), dicke: 4, gestrichelt: true });
+      grenzen.push(...strecke);
+    }
+
+    const a = zustand.auto;
+    if (a?.status === "ok" && a.polyline) {
+      const punkte = dekodiere(a.polyline);
+      const farbe = { NORMAL: css("--accent"), SLOW: css("--warn"), TRAFFIC_JAM: css("--bad") };
+      const abschnitte = a.stauAbschnitte?.length ? a.stauAbschnitte : [{ von: 0, bis: punkte.length - 1, tempo: "NORMAL" }];
+      for (const s of abschnitte) {
+        const teil = punkte.slice(s.von, (s.bis ?? punkte.length - 1) + 1);
+        if (teil.length > 1) karte.linie(teil, { farbe: farbe[s.tempo] ?? css("--accent"), dicke: 6 });
+      }
+      grenzen.push(...punkte);
+      karte.punkt(punkte[0], route.start, "#ffffff");
+      karte.punkt(punkte.at(-1), route.ziel, css("--accent"));
+    }
+    // Einmal zuschneiden, sobald beide Wege da sind; danach bleibt der Ausschnitt, den du gewählt hast.
+    const beide = strecke.length && a?.status === "ok";
+    if (grenzen.length && !zugeschnitten) {
+      karte.zuschneiden(grenzen);
+      zugeschnitten = beide;
+    }
+  }
+
+  // ---------- Bahn ----------
+  function renderBahn() {
+    const ziel = $("bahn");
+    if (!zustand.bahn) {
+      if (zustand.bahnFehler) ziel.replaceChildren(el("p", "zustand", `Bahndaten gerade nicht abrufbar: ${zustand.bahnFehler}`));
+      return;
+    }
+    const liste = el("ul", "tafel");
+    for (const v of zustand.bahn.verbindungen) {
+      const li = el("li", "zug");
+      const zuSpaet = !erreichbar(v);
+      if (v.ausfall) li.classList.add("ausgefallen");
+      if (zuSpaet) li.classList.add("verpasst");
+
+      const zeit = el("div", "zeit");
+      zeit.append(el("div", "ist", uhr(v.abfahrtIst)));
+      if (v.verspaetungAbfahrt !== 0) zeit.append(el("div", "plan", uhr(v.abfahrtPlan)));
+
+      const mitte = el("div", "mitte");
+      const linien = el("div", "linien");
+      for (const l of v.linien) linien.append(el("span", "linie" + (/^S\d/.test(l) ? " s3" : ""), l));
+      mitte.append(linien);
+      if (v.fussMin > 0) mitte.append(el("div", "sub", `losgehen ${uhr(v.losgehen)} · ${v.fussMin} min zu Fuß zur Haltestelle`));
+      const umstieg = v.umstiege === 0 ? "direkt" : v.umstiege === 1 ? "1 Umstieg" : `${v.umstiege} Umstiege`;
+      mitte.append(el("div", "sub", `an ${uhr(v.ankunftIst)} · ${v.dauerMin} min · ${umstieg}${v.gleis ? " · " + v.gleis : ""}`));
+      for (const h of v.hinweise.slice(0, 2)) mitte.append(el("div", "hinweis", h));
+      if (zuSpaet && !v.ausfall) mitte.append(el("div", "sub", "zu Fuß nicht mehr erreichbar"));
+
+      let pill;
+      if (v.ausfall) pill = el("span", "pill ausfall", "fällt aus");
+      else if (v.verspaetungAbfahrt <= 0) pill = el("span", "pill puenktlich", "pünktlich");
+      else pill = el("span", "pill " + (v.verspaetungAbfahrt >= 6 ? "sehrspaet" : "spaet"), `+${v.verspaetungAbfahrt}`);
+
+      li.append(zeit, mitte, pill);
+      liste.append(li);
+    }
+    if (!zustand.bahn.verbindungen.length) return ziel.replaceChildren(el("p", "zustand", "Keine Verbindungen in der nächsten Zeit."));
+    ziel.replaceChildren(liste);
+  }
+
+  // ---------- Auto ----------
+  function renderAuto() {
+    const ziel = $("auto");
+    const a = zustand.auto;
+    if (!a) {
+      if (zustand.autoFehler) ziel.replaceChildren(el("p", "zustand", `Autodaten gerade nicht abrufbar: ${zustand.autoFehler}`));
+      return;
+    }
+    if (a.status === "kein_key") {
+      const p = el("p", "zustand");
+      p.append("Kein Google-Key. Eintragen in ", el("code", null, "~/pendel-dashboard/.env"), " und die App neu starten.");
+      return ziel.replaceChildren(p);
+    }
+    const box = el("div");
+    box.style.display = "grid";
+    box.style.gap = "14px";
+    const zahl = el("div", "auto-zahl");
+    zahl.append(el("span", "min", String(a.dauerMin)), el("span", "einheit", "min"));
+    const klasse = a.stauMin <= 2 ? "frei" : a.stauMin <= 8 ? "zaeh" : "dicht";
+    zahl.append(el("span", "stau " + klasse, a.stauMin <= 0 ? "freie Fahrt" : `+${a.stauMin} min Stau`));
+
+    const dl = el("dl", "fakten");
+    const zeile = (k, v) => dl.append(el("dt", null, k), el("dd", null, v));
+    zeile("Ankunft", uhr(Date.now() + a.dauerMin * 60000));
+    zeile("Ohne Verkehr", `${a.ohneVerkehrMin} min`);
+    zeile("Strecke", `${String(a.km).replace(".", ",")} km${a.route ? " über " + a.route : ""}`);
+    zeile("Stand", uhr(a.abgerufen));
+
+    const link = el("a", "extern", "In Google Maps öffnen ↗");
+    link.href = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(route.start)}&destination=${encodeURIComponent(route.ziel)}&travelmode=driving`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    box.append(zahl, dl, link);
+    ziel.replaceChildren(box);
+  }
+
+  // ---------- Urteil ----------
+  // Startet die Reise mit einem Fußweg (Adresse als Start), rechnet die VVS ihn schon ein;
+  // sonst gilt der eingestellte Fußweg zur Haltestelle.
+  function erreichbar(v) {
+    if (v.fussMin > 0) return new Date(v.losgehen).getTime() >= Date.now() - 60000;
+    return new Date(v.abfahrtIst).getTime() >= Date.now() + fussweg() * 60000;
+  }
+
+  function renderUrteil() {
+    const jetzt = Date.now();
+    const zug = zustand.bahn?.verbindungen.find((v) => !v.ausfall && erreichbar(v));
+    const autoOk = zustand.auto?.status === "ok";
+    const bahnAn = zug ? new Date(zug.ankunftIst).getTime() : null;
+    const autoAn = autoOk ? jetzt + zustand.auto.dauerMin * 60000 : null;
+    const satz = $("urteil-satz"), detail = $("urteil-detail");
+    if (bahnAn && autoAn) {
+      const diff = Math.round((autoAn - bahnAn) / 60000);
+      satz.textContent = diff > 0 ? `Bahn ist ${diff} min früher am Ziel.` : diff < 0 ? `Auto ist ${-diff} min früher am Ziel.` : "Bahn und Auto kommen gleichzeitig an.";
+      const fuss = zug.fussMin > 0 ? `losgehen ${uhr(zug.losgehen)}` : `${fussweg()} min Fußweg`;
+      detail.textContent = `Bahn: ${zug.linien.join(" + ")} ab ${uhr(zug.abfahrtIst)}, an ${uhr(bahnAn)} (${fuss}) · Auto: an ${uhr(autoAn)}`;
+    } else if (bahnAn) {
+      satz.textContent = `Nächster erreichbarer Zug ist um ${uhr(bahnAn)} am Ziel.`;
+      detail.textContent = "Autodaten fehlen gerade.";
+    } else if (autoAn) {
+      satz.textContent = `Mit dem Auto um ${uhr(autoAn)} am Ziel.`;
+      detail.textContent = zustand.bahnFehler ? "Für diese Strecke findet die VVS gerade keine Bahnverbindung." : "Bahndaten fehlen gerade.";
+    } else {
+      satz.textContent = "Warte auf Bahn- und Autodaten …";
+      detail.textContent = "";
+    }
+  }
+
+  function render() {
+    renderBahn();
+    renderAuto();
+    renderUrteil();
+    const t = zustand.bahn?.abgerufen;
+    if (t) $("stand").textContent = `Stand ${uhr(t)}`;
+    // Titel mit den Namen, wie die VVS sie aufgelöst hat; bis dahin die Eingabe.
+    const von = zustand.bahn?.start ?? route.start, nach = zustand.bahn?.ziel ?? route.ziel;
+    const h1 = $("titel");
+    h1.replaceChildren(von, " ", el("span", "arrow", "→"), " ", nach);
+    document.title = `Pendel ${route.start} → ${route.ziel}`;
+  }
+
+  // Jede Abfrage trägt die Strecke mit; eine Antwort zu einer alten Strecke wird verworfen.
+  async function lade(name) {
+    const fuer = abfrage();
+    try {
+      const res = await fetch(`/api/${name}?${fuer}`, { cache: "no-store" });
+      const daten = await res.json();
+      if (fuer !== abfrage()) return;
+      if (!res.ok) throw new Error(daten.fehler ?? `HTTP ${res.status}`);
+      zustand[name] = daten;
+      zustand[name + "Fehler"] = null;
+    } catch (e) {
+      if (fuer !== abfrage()) return;
+      zustand[name] = null;
+      zustand[name + "Fehler"] = e.message;
+    }
+    render();
+    zeichneKarte();
+  }
+
+  function alleNeu() {
+    zustand.bahn = zustand.auto = zustand.bahnFehler = zustand.autoFehler = null;
+    zugeschnitten = false;
+    $("bahn").replaceChildren(el("div", "lade"));
+    $("auto").replaceChildren(el("div", "lade"));
+    render();
+    zeichneKarte();
+    lade("bahn");
+    lade("auto");
+  }
+
+  $("route").addEventListener("submit", (e) => {
+    e.preventDefault();
+    routeSetzen($("start").value, $("ziel").value);
+    alleNeu();
+  });
+  $("tauschen").addEventListener("click", () => {
+    routeSetzen($("ziel").value, $("start").value);
+    alleNeu();
+  });
+  $("neu").addEventListener("click", () => { lade("bahn"); lade("auto"); });
+
+  (async () => {
+    routeAusAdresse();
+    if (!route.start || !route.ziel) {
+      try {
+        const standard = await (await fetch("/api/config")).json();
+        route.start ||= standard.start;
+        route.ziel ||= standard.ziel;
+      } catch {}
+    }
+    routeSetzen(route.start, route.ziel);
+    starteKarte();
+    alleNeu();
+    setInterval(() => lade("bahn"), BAHN_MS);
+    setInterval(() => lade("auto"), AUTO_MS);
+    setInterval(render, 30000);
+  })();
+</script>
+</body>
+</html>

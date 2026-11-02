@@ -1,0 +1,485 @@
+<title>Pendel Schwaikheim</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&family=Overpass+Mono:wght@400;600&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+  /* Layout: Anzeigetafel. Oben das Urteil (wer ist jetzt schneller), darunter Bahn und Auto nebeneinander. */
+  :root {
+    --bg: #eef2f5;
+    --panel: #ffffff;
+    --fg: #14202b;
+    --muted: #5b6b7a;
+    --line: #d5dce3;
+    --accent: #0b5fa5;      /* Autobahn-Schilderblau */
+    --s3: #f08a00;          /* Linienfarbe S3, S-Bahn Stuttgart */
+    --good: #1e7f4f;
+    --warn: #a86a12;
+    --bad: #c0392b;
+    --chip: #e3e9ee;
+    --font-display: "Overpass", "Helvetica Neue", Arial, sans-serif;
+    --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Overpass Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e151c; --panel: #16212b; --fg: #e6edf3; --muted: #93a4b4; --line: #26343f;
+      --accent: #5aa9e6; --s3: #ff9f2e; --good: #4cc38a; --warn: #e3b341; --bad: #f0776a; --chip: #22303c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e151c; --panel: #16212b; --fg: #e6edf3; --muted: #93a4b4; --line: #26343f;
+    --accent: #5aa9e6; --s3: #ff9f2e; --good: #4cc38a; --warn: #e3b341; --bad: #f0776a; --chip: #22303c;
+    color-scheme: dark;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.45;
+  }
+  .wrap {
+    max-width: 960px;
+    margin-inline: auto;
+    padding-block: 24px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: grid;
+    gap: 20px;
+  }
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px; }
+  h1 {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(1.5rem, 4vw, 2.1rem);
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h1 .arrow { color: var(--accent); }
+  .stand { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  button, input {
+    font: inherit;
+    color: var(--fg);
+  }
+  button {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  label.fuss { display: flex; align-items: center; gap: 6px; font-size: 0.875rem; color: var(--muted); }
+  label.fuss input {
+    width: 3.2em;
+    padding: 4px 6px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    font-family: var(--font-mono);
+    text-align: right;
+  }
+
+  .urteil {
+    background: var(--accent);
+    color: #fff;
+    border-radius: 10px;
+    padding: 16px 20px;
+    display: grid;
+    gap: 4px;
+  }
+  .urteil .kicker {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.85;
+  }
+  .urteil .satz {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: clamp(1.15rem, 3vw, 1.45rem);
+    text-wrap: balance;
+  }
+  .urteil .detail { font-size: 0.9rem; opacity: 0.9; font-variant-numeric: tabular-nums; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+    gap: 20px;
+    align-items: start;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px;
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+  }
+  .card h2 {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.1rem;
+    margin: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .card h2 small { font-family: var(--font-body); font-weight: 400; font-size: 0.8rem; color: var(--muted); }
+
+  .tafel { list-style: none; margin: 0; padding: 0; display: grid; }
+  .zug {
+    display: grid;
+    grid-template-columns: 4.2rem 1fr auto;
+    gap: 4px 12px;
+    align-items: center;
+    padding-block: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .zug:first-child { border-top: 0; padding-top: 0; }
+  .zeit { font-family: var(--font-mono); font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .zeit .ist { font-size: 1.25rem; font-weight: 600; }
+  .zeit .plan { font-size: 0.8rem; color: var(--muted); text-decoration: line-through; }
+  .zeit .plan[hidden] { display: none; }
+  .mitte { min-width: 0; display: grid; gap: 2px; }
+  .linien { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .linie {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 0.78rem;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--chip);
+    color: var(--fg);
+  }
+  .linie.s3 { background: var(--s3); color: #1a1000; }
+  .sub { font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .hinweis { font-size: 0.8rem; color: var(--warn); }
+  .pill {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 6px;
+    white-space: nowrap;
+    border: 1px solid currentColor;
+  }
+  .pill.puenktlich { color: var(--good); }
+  .pill.spaet { color: var(--warn); }
+  .pill.sehrspaet, .pill.ausfall { color: var(--bad); }
+  .zug.ausgefallen .ist { text-decoration: line-through; color: var(--muted); }
+  .zug.verpasst { opacity: 0.55; }
+
+  .auto-zahl { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .auto-zahl .min {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: clamp(3rem, 9vw, 4.2rem);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .auto-zahl .einheit { font-size: 1.1rem; color: var(--muted); }
+  .stau { font-family: var(--font-mono); font-weight: 600; }
+  .stau.frei { color: var(--good); }
+  .stau.zaeh { color: var(--warn); }
+  .stau.dicht { color: var(--bad); }
+  dl.fakten { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: 0.9rem; }
+  dl.fakten dt { color: var(--muted); }
+  dl.fakten dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+  .zustand { color: var(--muted); font-size: 0.95rem; }
+  .zustand strong { color: var(--fg); }
+  .zustand code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--chip);
+    padding: 1px 5px;
+    border-radius: 4px;
+    word-break: break-all;
+  }
+  .lade {
+    height: 1.1rem;
+    border-radius: 4px;
+    background: var(--chip);
+    width: 70%;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .lade { animation: puls 1.4s ease-in-out infinite; }
+    @keyframes puls { 50% { opacity: 0.45; } }
+  }
+  footer { font-size: 0.8rem; color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Schwaikheim <span class="arrow">→</span> Stuttgart Hbf</h1>
+      <div class="stand" id="stand">Verbinde mit dem Pendel-Server …</div>
+    </div>
+    <div class="controls">
+      <label class="fuss" for="fussweg">Fußweg zum Bahnhof <input id="fussweg" type="number" min="0" max="60" value="8"> min</label>
+      <button id="neu" type="button">Jetzt aktualisieren</button>
+    </div>
+  </header>
+
+  <section class="urteil" aria-live="polite">
+    <span class="kicker">Wenn du jetzt losgehst</span>
+    <span class="satz" id="urteil-satz">Warte auf Bahn- und Autodaten …</span>
+    <span class="detail" id="urteil-detail"></span>
+  </section>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="bahn-titel">
+      <h2 id="bahn-titel">Bahn <small>S3 und Regionalzüge, Echtzeit VVS</small></h2>
+      <div id="bahn">
+        <div class="lade"></div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="auto-titel">
+      <h2 id="auto-titel">Auto <small>Fahrzeit mit Verkehr, Google</small></h2>
+      <div id="auto">
+        <div class="lade"></div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    Bahn: VVS-Fahrplanauskunft mit Echtzeit, jede Minute neu. Auto: Google Routes API, alle 3 Minuten neu.
+    Die Daten holt der lokale Pendel-Server auf deinem Mac; die Seite läuft deshalb nur in der Claude-Desktop-App.
+    <div id="diag">Diagnose: warte auf Antwort der App …</div>
+  </footer>
+</div>
+
+<script>
+  const SERVER = "host:pendel";
+  const BAHN_MS = 60000;
+  const AUTO_MS = 180000;
+
+  const zustand = { bahn: null, auto: null, bahnFehler: null, autoFehler: null };
+  const $ = (id) => document.getElementById(id);
+
+  const uhr = (iso) =>
+    new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
+
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  // Fußweg: persönliche Einstellung, nur in diesem Browser gemerkt.
+  const fussInput = $("fussweg");
+  try {
+    const gemerkt = localStorage.getItem("pendel-fussweg");
+    if (gemerkt != null) fussInput.value = gemerkt;
+  } catch {}
+  const fussweg = () => Math.max(0, Number(fussInput.value) || 0);
+  fussInput.addEventListener("input", () => {
+    try { localStorage.setItem("pendel-fussweg", String(fussweg())); } catch {}
+    render();
+  });
+
+  function fehlerText(err) {
+    if (!err) return "";
+    if (["server_not_connected", "not_granted", "capability_disabled", "capability_removed", "timeout"].includes(err.code)) {
+      return "kein-server";
+    }
+    if (err.code === "not_in_manifest") return "Für diese Seite nicht freigegeben. In den Berechtigungen der Seite den Pendel-Server erlauben.";
+    if (err.code === "tool_error") return err.message || "Der Pendel-Server meldet einen Fehler.";
+    return "Gerade nicht erreichbar. Die Seite versucht es beim nächsten Intervall erneut.";
+  }
+
+  function keinServer(ziel, err) {
+    const box = el("div", "zustand");
+    const p1 = el("p");
+    p1.append(el("strong", null, "Pendel-Server nicht erreichbar. "), "Diese Seite holt ihre Daten von einem Server auf deinem Mac und läuft nur in der Claude-Desktop-App.");
+    const p2 = el("p");
+    p2.append("Fehlercode: ", el("code", null, `${err?.code ?? "?"}${err?.message ? " · " + err.message : ""}`));
+    box.append(p1, p2);
+    ziel.replaceChildren(box);
+  }
+
+  function renderBahn() {
+    const ziel = $("bahn");
+    const f = fehlerText(zustand.bahnFehler);
+    if (!zustand.bahn) {
+      if (f === "kein-server") return keinServer(ziel, zustand.bahnFehler);
+      if (f) return ziel.replaceChildren(el("p", "zustand", f));
+      return;
+    }
+    const jetzt = Date.now();
+    const ankommen = jetzt + fussweg() * 60000;
+    const liste = el("ul", "tafel");
+    for (const v of zustand.bahn.verbindungen) {
+      const li = el("li", "zug");
+      if (v.ausfall) li.classList.add("ausgefallen");
+      if (new Date(v.abfahrtIst).getTime() < ankommen) li.classList.add("verpasst");
+
+      const zeit = el("div", "zeit");
+      zeit.append(el("div", "ist", uhr(v.abfahrtIst)));
+      const plan = el("div", "plan", uhr(v.abfahrtPlan));
+      plan.hidden = v.verspaetungAbfahrt === 0;
+      zeit.append(plan);
+
+      const mitte = el("div", "mitte");
+      const linien = el("div", "linien");
+      for (const l of v.linien) linien.append(el("span", "linie" + (l === "S3" ? " s3" : ""), l));
+      mitte.append(linien);
+      const umstieg = v.umstiege === 0 ? "direkt" : v.umstiege === 1 ? "1 Umstieg" : `${v.umstiege} Umstiege`;
+      mitte.append(el("div", "sub", `an ${uhr(v.ankunftIst)} · ${v.dauerMin} min · ${umstieg}${v.gleis ? " · " + v.gleis : ""}`));
+      for (const h of v.hinweise.slice(0, 2)) mitte.append(el("div", "hinweis", h));
+      if (new Date(v.abfahrtIst).getTime() < ankommen && !v.ausfall) {
+        mitte.append(el("div", "sub", "zu Fuß nicht mehr erreichbar"));
+      }
+
+      let pill;
+      if (v.ausfall) pill = el("span", "pill ausfall", "fällt aus");
+      else if (v.verspaetungAbfahrt <= 0) pill = el("span", "pill puenktlich", "pünktlich");
+      else pill = el("span", "pill " + (v.verspaetungAbfahrt >= 6 ? "sehrspaet" : "spaet"), `+${v.verspaetungAbfahrt}`);
+
+      li.append(zeit, mitte, pill);
+      liste.append(li);
+    }
+    if (!zustand.bahn.verbindungen.length) return ziel.replaceChildren(el("p", "zustand", "Keine Verbindungen in der nächsten Zeit gefunden."));
+    ziel.replaceChildren(liste);
+  }
+
+  function renderAuto() {
+    const ziel = $("auto");
+    const f = fehlerText(zustand.autoFehler);
+    const a = zustand.auto;
+    if (!a) {
+      if (f === "kein-server") return keinServer(ziel, zustand.autoFehler);
+      if (f) return ziel.replaceChildren(el("p", "zustand", f));
+      return;
+    }
+    if (a.status === "kein_key") {
+      const box = el("div", "zustand");
+      const p1 = el("p");
+      p1.append(el("strong", null, "Noch kein Google-Key. "), "Für Live-Stau braucht der Pendel-Server einen Schlüssel für die Google Routes API.");
+      const p2 = el("p");
+      p2.append("Eintragen in ", el("code", null, "~/pendel-dashboard/.env"), " als ", el("code", null, "GOOGLE_MAPS_API_KEY=…"), ", danach die Claude-App neu starten.");
+      box.append(p1, p2);
+      return ziel.replaceChildren(box);
+    }
+    const wrap = el("div");
+    wrap.style.display = "grid";
+    wrap.style.gap = "14px";
+
+    const zahl = el("div", "auto-zahl");
+    zahl.append(el("span", "min", String(a.dauerMin)), el("span", "einheit", "min"));
+    const stauKlasse = a.stauMin <= 2 ? "frei" : a.stauMin <= 8 ? "zaeh" : "dicht";
+    zahl.append(el("span", "stau " + stauKlasse, a.stauMin <= 0 ? "freie Fahrt" : `+${a.stauMin} min Stau`));
+
+    const dl = el("dl", "fakten");
+    const zeile = (k, v) => dl.append(el("dt", null, k), el("dd", null, v));
+    zeile("Ankunft", uhr(Date.now() + a.dauerMin * 60000));
+    zeile("Ohne Verkehr", `${a.ohneVerkehrMin} min`);
+    zeile("Strecke", `${String(a.km).replace(".", ",")} km${a.route ? " " + a.route : ""}`);
+    zeile("Stand", uhr(a.abgerufen));
+
+    wrap.append(zahl, dl);
+    ziel.replaceChildren(wrap);
+  }
+
+  function renderUrteil() {
+    const satz = $("urteil-satz");
+    const detail = $("urteil-detail");
+    const jetzt = Date.now();
+    const bahnZug = zustand.bahn?.verbindungen.find(
+      (v) => !v.ausfall && new Date(v.abfahrtIst).getTime() >= jetzt + fussweg() * 60000,
+    );
+    const autoOk = zustand.auto?.status === "ok";
+    const bahnAn = bahnZug ? new Date(bahnZug.ankunftIst).getTime() : null;
+    const autoAn = autoOk ? jetzt + zustand.auto.dauerMin * 60000 : null;
+
+    if (bahnAn && autoAn) {
+      const diff = Math.round((autoAn - bahnAn) / 60000);
+      satz.textContent =
+        diff > 0 ? `Bahn ist ${diff} min früher am Hbf.` : diff < 0 ? `Auto ist ${-diff} min früher am Hbf.` : "Bahn und Auto kommen gleichzeitig an.";
+      detail.textContent = `Bahn: ${bahnZug.linien.join(" + ")} ab ${uhr(bahnZug.abfahrtIst)}, an ${uhr(bahnAn)} · Auto: an ${uhr(autoAn)}`;
+    } else if (bahnAn) {
+      satz.textContent = `Nächster erreichbarer Zug ist um ${uhr(bahnAn)} am Hbf.`;
+      detail.textContent = `${bahnZug.linien.join(" + ")} ab ${uhr(bahnZug.abfahrtIst)}, ${fussweg()} min Fußweg eingerechnet. Für den Vergleich mit dem Auto fehlt noch der Google-Key.`;
+    } else if (autoAn) {
+      satz.textContent = `Mit dem Auto um ${uhr(autoAn)} am Hbf.`;
+      detail.textContent = "Bahndaten fehlen gerade.";
+    }
+  }
+
+  function renderStand() {
+    const t = zustand.bahn?.abgerufen ?? (zustand.auto?.status === "ok" ? zustand.auto.abgerufen : null);
+    if (t) $("stand").textContent = `Stand ${uhr(t)} · Bahn jede Minute, Auto alle 3 Minuten`;
+    else if (fehlerText(zustand.bahnFehler) === "kein-server") $("stand").textContent = "Pendel-Server nicht verbunden";
+  }
+
+  function render() {
+    renderBahn();
+    renderAuto();
+    renderUrteil();
+    renderStand();
+  }
+
+  // Ohne Live-Verbindung bleibt nach 12 s ein klarer Hinweis statt Ladebalken.
+  const keinKontakt = setTimeout(() => {
+    if (!zustand.bahn && !zustand.bahnFehler) {
+      zustand.bahnFehler = zustand.autoFehler = { code: "timeout", message: "12 s ohne Antwort vom Pendel-Server" };
+      render();
+    }
+  }, 12000);
+
+  (async () => {
+    const mcp = await window.claude?.use?.("mcp");
+    if (!mcp) {
+      clearTimeout(keinKontakt);
+      $("diag").textContent = "Diagnose: claude.use(\"mcp\") liefert null, diese Ansicht kann keine MCP-Aufrufe.";
+      zustand.bahnFehler = zustand.autoFehler = { code: "not_granted", message: "claude.use(\"mcp\") ist null" };
+      return render();
+    }
+    // Diagnose: welche Server sieht diese Ansicht überhaupt?
+    mcp.listTools().then(
+      (r) => {
+        const liste = r.servers.map((s) => `${s.server} (${s.authStatus}, ${s.tools.length} Tools)`).join(", ");
+        $("diag").textContent = `Diagnose: sichtbare Server: ${liste || "keine"}`;
+      },
+      (e) => { $("diag").textContent = `Diagnose: listTools fehlgeschlagen, ${e?.code ?? "?"} ${e?.message ?? ""}`; },
+    );
+    mcp.watchTool(SERVER, "bahn_verbindungen", null, (ev) => {
+      clearTimeout(keinKontakt);
+      if (ev.type === "data") {
+        zustand.bahn = ev.result.payload;
+        zustand.bahnFehler = null;
+      } else {
+        zustand.bahnFehler = ev.error;
+        if (["server_not_connected", "not_in_manifest", "not_granted", "blocked_by_policy"].includes(ev.error.code)) zustand.bahn = null;
+      }
+      render();
+    }, { refetchInterval: BAHN_MS, cache: { staleTime: 30000, gcTime: 600000 } });
+
+    mcp.watchTool(SERVER, "auto_fahrzeit", null, (ev) => {
+      if (ev.type === "data") {
+        zustand.auto = ev.result.payload;
+        zustand.autoFehler = null;
+      } else {
+        zustand.autoFehler = ev.error;
+        if (["server_not_connected", "not_in_manifest", "not_granted", "blocked_by_policy"].includes(ev.error.code)) zustand.auto = null;
+      }
+      render();
+    }, { refetchInterval: AUTO_MS, cache: { staleTime: 120000, gcTime: 600000 } });
+
+    $("neu").addEventListener("click", () => {
+      mcp.invalidate(SERVER).catch(() => {});
+    });
+  })();
+
+  // Uhrzeit-abhängige Teile (verpasste Züge, Ankunft Auto) laufen auch zwischen den Abrufen weiter.
+  setInterval(render, 30000);
+</script>
