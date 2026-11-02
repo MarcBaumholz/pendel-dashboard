@@ -94,3 +94,7 @@ claude mcp add pendel -s user -- node --env-file-if-exists=$PWD/.env $PWD/server
 | `server.mjs` | Abfragen an VVS und Google, zugleich MCP-Server |
 | `cli.mjs` | Ausgabe im Terminal |
 | `dashboard.html` | ältere Version als Claude-Artifact (nicht mehr gepflegt) |
+
+## Lizenz
+
+MIT, siehe [LICENSE](LICENSE).
